@@ -55,7 +55,13 @@ const userController = {
   },
   getUser: (req, res, next) => {
     return Promise.all([
-      User.findByPk(req.params.id, { raw: true }),
+      User.findByPk(req.params.id, {
+        include: [
+          { model: Restaurant, as: 'FavoritedRestaurants' },
+          { model: User, as: 'Followers' },
+          { model: User, as: 'Followings' }
+        ]
+      }),
       Comment.findAndCountAll({
         where: { userId: req.params.id },
         include: Restaurant,
@@ -64,12 +70,21 @@ const userController = {
       })
     ])
       .then(([user, comment]) => {
-        const restaurants = comment.rows.map(r => r.Restaurant)
         if (!user) throw new Error("User didn't exist")
+        const restaurants = comment.rows.map(r => r.Restaurant)
+        const groupRestaurants = restaurants.filter(
+          (restaurant, index, thisArray) => {
+            return (
+              index === thisArray.findIndex(value => value.id === restaurant.id)
+            )
+          }
+        )
+        user.dataValues.isFollowed =
+          req.user && req.user.Followings.some(f => f.id === user.dataValues.id)
         return res.render('users/profile', {
-          user,
-          count: comment.count,
-          restaurants
+          user: user.toJSON(),
+          comment,
+          restaurants: groupRestaurants
         })
       })
       .catch(err => next(err))
@@ -177,6 +192,9 @@ const userController = {
       })
     ])
       .then(([user, followship]) => {
+        if (req.user.id === Number(userId)) {
+          throw new Error("You can't follow yourself")
+        }
         if (!user) throw new Error("User didn't exist")
         if (followship) throw new Error('You are already following this user')
         return Followship.create({
